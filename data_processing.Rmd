@@ -1,0 +1,129 @@
+---
+title: "Final Report"
+author: "Robbie Walsh"
+date: "8/23/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(magrittr)
+data <- data.frame(fread("C:/Users/robbi/OneDrive/Documents/stat_prac2/data/Multifamily/FNMA_MF_Loan_Performance_Data_202203.csv"))
+```
+
+```{r}
+names(data) <- c("LoanID","Acquisition_date","note_date","maturity_date_o","balance_at_aquisition","amortization_type","interest_type","product_type","balance_o","amorterm","int_rate_o","lien","transID","origination_date_o","ltv_aquisition","underwritten_dscr","underwritten_dscr_type","amorterm_o","io_term_o","io_end_date","ever_60dpd","loss_sharing_type","modified_loss_sharing_pct","num_properties_o","property_acquisition_total_unit_count","property_type","year_built","prop_city","prop_state","zip_code","msa","occupied","liquidation_code","liquidation_date","foreclosure_date","credit_event_date","foreclosure_value","lifetime_net_credit_loss_amt","sale_price","default_amt","credit_event_type","reporting_date","loan_active_property_count","note_rate","maturity_date","balance_t","delinquency_bal","loan_status","sdq_indicator","recent_mod_date","mod_indicator","defeasance_date","prepayent_provision","prepayment_provision_end_date","affordable_housing_type","mcirt_dealID","mcas_dealID","dus_prepayment_outcome","dus_prepayment_segments","loan_age")
+data %<>% mutate(origination_date_o = as.Date(origination_date_o),io_end_date = as.Date(io_end_date),maturity_date = as.Date(maturity_date),reporting_date = as.Date(reporting_date))
+
+select_list <- c("LoanID","maturity_date_o","is_balloon","is_arm","origination_amount_o","amorterm_o","int_rate","lien","origination_date_o","underwritten_dscr","amorterm_o","io_end_date","occupied","liquidation_code","ltv_aquisition","default_amt","reporting_date","balance_t","loan_status","loan_age")
+
+data %<>% mutate(is_balloon = case_when(amortization_type == "" ~ 0,
+                                amortization_type == "Amortizing Baloon" ~ 1,
+                                amortization_type == "Fully Amortizing" ~ 0,
+                                amortization_type == "Interest Only/Amortizing/Balloon" ~ 1,
+                                amortization_type == "Interest Only/Balloon" ~ 1,
+                                amortization_type == "Interest Only/Fully Amortizing" ~ 0),
+                 is_arm = ifelse(interest_type == "ARM",1,0),
+                 origination_amount_o = balance_o,
+                 lien = as.factor(case_when(lien == "" ~ 1,
+                                  lien == "First" ~ 1,
+                                  lien == "Second" ~ 2,
+                                  lien == "Third" ~ 3,
+                                  lien == "Fourth or More Subordinate" ~ 4))) 
+data$orig_date_o <- data$maturity_date_o %m-% months(data$amorterm_o)
+data %<>% mutate(orig_date_o = pmin(reporting_date,orig_date_o))
+data %<>% mutate(loan_age = (year(reporting_date) - year(orig_date_o))*12 + (month(reporting_date) - month(orig_date_o)))
+
+data %<>% select(LoanID,maturity_date_o,is_balloon,is_arm,orig_date_o,amorterm_o,int_rate_o,lien,orig_date_o,underwritten_dscr,io_end_date,occupied,liquidation_code,ltv_aquisition,default_amt,reporting_date,balance_t,loan_status,loan_age)
+
+data %<>% mutate(balance_t = as.numeric(str_remove_all(str_sub(balance_t,2,-1),",")),
+                 default_amt = as.numeric(str_remove_all(str_sub(default_amt,2,-1),",")))
+
+data %<>% mutate(is_balloon = ifelse(is.na(is_balloon),0,is_balloon),
+                 underwritten_dscr = ifelse(is.na(underwritten_dscr),1.4,underwritten_dscr),
+                 io_end = ifelse(reporting_date >= io_end_date,1,0),
+                 io_end_date = ifelse(reporting_date==io_end_date,1,0),
+                 occupied = ifelse(is.na(occupied),90,occupied),
+                 ltv_aquisition = ifelse(is.na(ltv_aquisition),65,ltv_aquisition),
+                 io_end = ifelse(is.na(io_end),0,io_end),
+                 io_end_date = ifelse(is.na(io_end_date),0,1),
+                 default_amt = ifelse(is.na(default_amt),0,default_amt)) 
+data %<>% mutate(loan_age_pct = loan_age/amorterm_o)
+day(data$orig_date_o) <- 1
+data %<>% mutate(loan_age_pct = ifelse(loan_age_pct>1,1,loan_age_pct),
+                 ltv_aquisition = ifelse(ltv_aquisition>100,100,ltv_aquisition),
+                 underwritten_dscr = ifelse(underwritten_dscr>3,3,underwritten_dscr))
+```
+
+```{r}
+# create default and prepayment definitions
+data %<>% mutate(default_flag = case_when(loan_status == "90+ Days Delinquent" ~ 1,
+                                          liquidation_code == "Foreclosure" ~ 1,
+                                          TRUE ~ 0),
+                 prepayment_flag = case_when(liquidation_code %in% c("Fully Paid, Prepaid","Fully Paid, Matured","Third Party Sale","Fully Paid, Refinanced","Dissolution","Other Liquidation","Discounted Payoff","Repurchase","Deed-in-Lieu","Substitution") ~ 1,
+                                             TRUE ~ 0))
+```
+
+```{r}
+# merge in econ data
+files <- c("disp_inc","median_hpi","mort_int_rate","read_gdp","retail_sales","ump_rate")
+datadir <- "C:/Users/robbi/OneDrive/Documents/stat_prac2/data"
+income <- read.csv(file.path(datadir,"disp_inc.csv")) %>% mutate(DATE = mdy(DATE)) %>% rename(dispinc = DSPIC96)
+hpi <- read.csv(file.path(datadir,"median_hpi.csv")) %>% mutate(DATE = mdy(DATE)) %>% rename(medhpi = MSPNHSUS)
+rate <- read.csv(file.path(datadir,"mort_int_rate.csv")) %>% mutate(DATE = mdy(DATE)) %>% rename(mort_rate = MORTGAGE30US)
+day(rate$DATE) <- 1
+rate %<>% group_by(DATE) %>% summarize(mort_rate = mean(mort_rate)) %>% ungroup()
+gdp <- read.csv(file.path(datadir,"norm_gdp.csv")) %>% mutate(DATE = as.Date(DATE)) %>% rename(gdp = USALORSGPNOSTSAM)
+retail <- read.csv(file.path(datadir,"retail_sales.csv")) %>% mutate(DATE = mdy(DATE)) %>% rename(retail = MRTSSM44X72USS)
+ump <- read.csv(file.path(datadir,"ump_rate.csv")) %>% mutate(DATE = mdy(DATE)) %>% rename(ump = UNRATE)
+
+# time varying econ data
+data %<>% left_join(income,by=c("reporting_date"="DATE")) %>% rename(dispinc_t = dispinc) %>%
+  left_join(hpi,by=c("reporting_date"="DATE")) %>% rename(medhpi_t = medhpi) %>%
+  left_join(rate,by=c("reporting_date"="DATE")) %>% rename(mort_rate_t = mort_rate) %>%
+  left_join(gdp,by=c("reporting_date"="DATE")) %>% rename(gdp_t = gdp) %>%
+  left_join(retail,by=c("reporting_date"="DATE")) %>% rename(retail_t = retail) %>%
+  left_join(ump,by=c("reporting_date"="DATE")) %>% rename(ump_t = ump)
+
+# economic data at origination
+data %<>% left_join(income,by=c("orig_date_o"="DATE")) %>% rename(dispinc_o = dispinc) %>%
+  left_join(hpi,by=c("orig_date_o"="DATE")) %>% rename(medhpi_o = medhpi) %>%
+  left_join(rate,by=c("orig_date_o"="DATE")) %>% rename(mort_rate_o = mort_rate) %>%
+  left_join(ump,by=c("orig_date_o"="DATE")) %>% rename(ump_o = ump)
+
+# change since origination
+data %<>% mutate(dispinc_vt = ((dispinc_t - dispinc_o)/dispinc_o)*100,
+                 hpi_vt = ((medhpi_t - medhpi_o)/medhpi_o)*100,
+                 mort_rate_vt = mort_rate_t - mort_rate_o,
+                 ump_vt = ump_t - ump_o)
+```
+
+```{r}
+data %<>% mutate(tseas = as.factor(month(reporting_date)),
+                 vseas = as.factor(quarter(orig_date_o)))
+```
+
+```{r}
+# Create out of time sample and holdout sample, remove pandemic
+samp <- sample(x = unique(data$LoanID),size = 48839,replace = F)
+dev <- data %>% filter(reporting_date <= as.Date("2018-09-01") & (LoanID %in% samp)) 
+oot <- data %>% filter(reporting_date < as.Date("2020-03-01") & reporting_date > as.Date("2018-09-01"))
+test <- data %>% filter(reporting_date <= as.Date("2018-09-01") & !(LoanID %in% samp))
+eval <- rbind(test,oot)
+```
+
+
+```{r}
+# write data to a file
+write.csv(dev,file = "C:/Users/robbi/OneDrive/Documents/stat_prac2/data/dev_data.csv",row.names = F)
+write.csv(eval,file = "C:/Users/robbi/OneDrive/Documents/stat_prac2/data/test.csv",row.names = F)
+saveRDS(dev,file = "C:/Users/robbi/OneDrive/Documents/stat_prac2/data/dev_data.RDS")
+saveRDS(eval,file = "C:/Users/robbi/OneDrive/Documents/stat_prac2/data/test.RDS")
+
+```
+

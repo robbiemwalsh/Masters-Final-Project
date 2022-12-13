@@ -1,0 +1,118 @@
+---
+title: "Modeling"
+author: "Robbie Walsh"
+date: "9/12/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(magrittr)
+library(lspline)
+```
+
+```{r}
+dev <- readRDS("C:/Users/robbi/OneDrive/Documents/stat_prac2/data/dev_data.RDS")
+```
+
+
+```{r}
+# in-sample ends at 2018m9, starts after then
+age_knots <- c(0.5,0.85,0.95)
+age_spline <- lspline(dev$loan_age_pct,knots = age_knots,marginal = F)
+colnames(age_spline) <- c("sagelt_50","sage_50_85","sage_85_95","sagegt_95")
+dev %<>% cbind(age_spline)
+
+dev %<>% mutate(age_close = ifelse(loan_age == (amorterm_o - 1),1,0),
+                first_lien = ifelse(lien == 1,1,0))
+
+dev %<>% mutate(tseas = as.factor(tseas),vseas = as.factor(vseas))
+
+saveRDS(dev,"C:/Users/robbi/OneDrive/Documents/stat_prac2/data/dev_data.RDS")
+```
+
+```{r}
+form <- as.formula("default_flag ~ tseas + sagelt_50 + sage_50_85 + sage_85_95 + sagegt_95 + age_close +
+                   int_rate_o + ltv_aquisition + ump_vt + hpi_vt + gdp_t")
+mod <- glm(formula = form,family = binomial(link = "logit"),data = dev)
+gc()
+summary(mod)
+```
+
+```{r}
+saveRDS(mod,"C:/Users/robbi/OneDrive/Documents/stat_prac2/data/model.RDS")
+dev %<>% mutate(pred = predict(object = mod,newdata = .,type = "response"))
+gc()
+```
+
+```{r}
+graphdir <- "C:/Users/robbi/OneDrive/Documents/stat_prac2/data/graphs"
+
+png(filename = file.path(graphdir,"insamp_time.png"))
+print(dev %>% group_by(reporting_date) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% ggplot(aes(x=as.Date(reporting_date))) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue")) + labs(x="Calendar Date",y="Default Rate %")
+dev.off()
+
+png(filename = file.path(graphdir,"insamp_lap.png"))
+print(dev %>% mutate(loan_age_pct = round(loan_age_pct,2)) %>% group_by(loan_age_pct) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% ggplot(aes(x=loan_age_pct)) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue") + labs(x="Loan Age Percent",y="Default Rate %"))
+dev.off()
+
+png(filename = file.path(graphdir,"insamp_intrate.png"))
+print(dev %>% mutate(int_rate_o = round(int_rate_o,1)) %>% group_by(int_rate_o) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% ggplot(aes(x=int_rate_o)) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue") + labs(x="Origination Interest Rate",y="Default Rate %"))
+
+png(filename = file.path(graphdir,"insamp_underdscr.png"))
+print(dev %>% mutate(underwritten_dscr = round(underwritten_dscr,2)) %>% group_by(underwritten_dscr) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% filter(underwritten_dscr<2,actual<0.2) %>% ggplot(aes(x=underwritten_dscr)) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue") + labs(x="Underwritten DSCR",y="Default Rate %"))
+dev.off()
+
+png(filename = file.path(graphdir,"insamp_ltv.png"))
+print(dev %>% mutate(ltv_aquisition = round(ltv_aquisition/5)*5) %>% group_by(ltv_aquisition) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% ggplot(aes(x=ltv_aquisition)) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue") + labs(x="LTV at Acquisition",y="Default Rate %"))
+dev.off()
+
+png(filename = file.path(graphdir,"insamp_origdate.png"))
+print(dev %>% group_by(orig_date_o) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% filter(as.Date(orig_date_o)> as.Date("2000-01-01")) %>% ggplot(aes(x=as.Date(orig_date_o))) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue") + labs(x="Origination Date",y="Default Rate %"))
+dev.off()
+```
+
+```{r}
+test <- readRDS("C:/Users/robbi/OneDrive/Documents/stat_prac2/data/test.RDS")
+age_knots <- c(0.5,0.85,0.95)
+age_spline <- lspline(test$loan_age_pct,knots = age_knots,marginal = F)
+colnames(age_spline) <- c("sagelt_50","sage_50_85","sage_85_95","sagegt_95")
+test %<>% cbind(age_spline)
+
+test %<>% mutate(age_close = ifelse(loan_age == (amorterm_o - 1),1,0))
+test %<>% mutate(pred = predict(mod,newdata = .,type = "response"))
+gc()
+```
+
+```{r}
+graphdir <- "C:/Users/robbi/OneDrive/Documents/stat_prac2/data/graphs"
+
+png(filename = file.path(graphdir,"oos_time.png"))
+print(dev %>% group_by(reporting_date) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% ggplot(aes(x=as.Date(reporting_date))) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue")) + labs(x="Calendar Date",y="Default Rate %")
+dev.off()
+
+png(filename = file.path(graphdir,"oos_lap.png"))
+print(dev %>% mutate(loan_age_pct = round(loan_age_pct,2)) %>% group_by(loan_age_pct) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% ggplot(aes(x=loan_age_pct)) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue") + labs(x="Loan Age Percent",y="Default Rate %"))
+dev.off()
+
+png(filename = file.path(graphdir,"oos_intrate.png"))
+print(dev %>% mutate(int_rate_o = round(int_rate_o,1)) %>% group_by(int_rate_o) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% ggplot(aes(x=int_rate_o)) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue") + labs(x="Origination Interest Rate",y="Default Rate %"))
+
+png(filename = file.path(graphdir,"oos_underdscr.png"))
+print(dev %>% mutate(underwritten_dscr = round(underwritten_dscr,2)) %>% group_by(underwritten_dscr) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% filter(underwritten_dscr<2,actual<0.2) %>% ggplot(aes(x=underwritten_dscr)) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue") + labs(x="Underwritten DSCR",y="Default Rate %"))
+dev.off()
+
+png(filename = file.path(graphdir,"oos_ltv.png"))
+print(dev %>% mutate(ltv_aquisition = round(ltv_aquisition/5)*5) %>% group_by(ltv_aquisition) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% ggplot(aes(x=ltv_aquisition)) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue") + labs(x="LTV at Acquisition",y="Default Rate %"))
+dev.off()
+
+png(filename = file.path(graphdir,"oos_origdate.png"))
+print(dev %>% group_by(orig_date_o) %>% summarize(pred = mean(pred),actual = mean(default_flag)) %>% filter(as.Date(orig_date_o)> as.Date("2000-01-01")) %>% ggplot(aes(x=as.Date(orig_date_o))) + geom_line(aes(y=pred),col="red") + geom_line(aes(y=actual),col="blue") + labs(x="Origination Date",y="Default Rate %"))
+dev.off()
+```
+

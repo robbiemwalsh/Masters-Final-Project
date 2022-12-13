@@ -1,0 +1,88 @@
+---
+title: "EDA"
+author: "Robbie Walsh"
+date: "9/6/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(magrittr)
+```
+
+
+```{r}
+data <- read.csv("C:/Users/robbi/OneDrive/Documents/stat_prac2/data/dev_data.csv")
+```
+
+Will create several graphs of the default rate over several dimensions as EDA.
+
+```{r}
+data %>% group_by(reporting_date) %>% summarize(def_rate = mean(default_flag)*100) %>%
+  ggplot(aes(x=reporting_date,y=def_rate)) + geom_line() + labs(x="Date",y="Default Rate %",title = "Default Rate over Time")
+
+data %>% mutate(loan_age_pct = round(loan_age_pct,2)) %>% filter(loan_age_pct<1) %>% group_by(loan_age_pct) %>% summarize(def_rate = mean(default_flag)*100) %>%
+  ggplot(aes(x=loan_age_pct,y=def_rate)) + geom_line() + labs(x="Loan Age Pct",y="Default Rate %",title = "Default Rate over Loan Age Percent")
+
+data %>% mutate(ltv_aquisition = round(ltv_aquisition/5)*5) %>% filter(ltv_aquisition<150) %>% group_by(ltv_aquisition) %>% summarize(def_rate = mean(default_flag)*100) %>%
+  ggplot(aes(x=ltv_aquisition,y=def_rate)) + geom_line() + labs(x="LTV at Acquisition",y="Default Rate %",title = "Default Rate over LTV")
+
+data %>% mutate(int_rate_o = round(int_rate_o,1)) %>% filter(int_rate_o<9) %>% group_by(int_rate_o) %>% summarize(def_rate = mean(default_flag)*100) %>%
+  ggplot(aes(x=int_rate_o,y=def_rate)) + geom_line() + labs(x="Interest Rate at Origination",y="Default Rate %",title = "Default Rate over Interest Rate")
+
+data %>% mutate(underwritten_dscr = round(underwritten_dscr,2)) %>% filter(underwritten_dscr<3,underwritten_dscr>1) %>% group_by(underwritten_dscr) %>% summarize(def_rate = mean(default_flag)*100) %>% filter(def_rate < 20) %>%
+  ggplot(aes(x=underwritten_dscr,y=def_rate)) + geom_line() + labs(x="Underwritten DSCR",y="Default Rate %",title = "Default Rate over Underwritten DSCR")
+```
+
+```{r}
+data %>% mutate(ump_vt = round(ump_vt,1)) %>% group_by(ump_vt) %>% summarize(def = mean(default_flag)) %>% ggplot(aes(x=ump_vt,y=def)) + geom_line() + labs(x="Unemployment Change since Origination",y="Default Rate %",title = "Default Rate over Unemployment Change")
+
+data %>% mutate(mort_rate_vt = round(mort_rate_vt,2)) %>% group_by(mort_rate_vt) %>% summarize(def = mean(default_flag)) %>% ggplot(aes(x=mort_rate_vt,y=def)) + geom_line() + labs(x="Mortgage Rate Change since Origination",y="Default Rate %",title = "Default Rate over Mortgage Rate Change")
+
+data %>% mutate(hpi_vt = round(hpi_vt/5)*5) %>% group_by(hpi_vt) %>% summarize(def = mean(default_flag)) %>% filter(hpi_vt < 200) %>% ggplot(aes(x=hpi_vt,y=def)) + geom_line() + labs(x="HPI Change since Origination",y="Default Rate %",title = "Default Rate over HPI Change")
+
+data %>% mutate(dispinc_vt = round(dispinc_vt)) %>% group_by(dispinc_vt) %>% summarize(def = mean(default_flag)) %>% filter(dispinc_vt<100) %>% ggplot(aes(x=dispinc_vt,y=def)) + geom_line() + labs(x="Income Change since Origination",y="Default Rate %",title = "Default Rate over Income Change")
+
+```
+
+
+Other EDA, summary statistics
+
+```{r}
+num_loans <- length(unique(data$LoanID))
+num_obs <- nrow(data)
+date_range <- paste0(year(min(data$reporting_date)),"m",month(min(data$reporting_date))," - ",year(max(data$reporting_date)),"m",month(max(data$reporting_date)))
+vintage_range <- paste0(year(min(data$orig_date_o)),"m",month(min(data$orig_date_o))," - ",year(max(data$orig_date_o)),"m",month(max(data$orig_date_o)))
+
+table <- data.frame(Field = c("Number of Loans","Number of Observations","Date Range","Origination Vintage Range"),Value = c(format(num_loans,big.mark=","),format(num_obs,big.mark=","),date_range,vintage_range))
+table
+```
+
+Summary statistics for key quantitative variables
+
+```{r}
+vars <- c("int_rate_o","underwritten_dscr","ltv_aquisition","loan_age","dispinc_t","medhpi_t","mort_rate_t","gdp_t","ump_t","ump_vt","hpi_vt","mort_rate_vt")
+sum_stats <- function(df,var) {
+  variable <- var
+  miss <- sum(is.na(df[[var]]))
+  minimum <- round(min(df[[var]]),2)
+  maximum <- round(max(df[[var]]),2)
+  avg <- round(mean(df[[var]]),2)
+  out <- c(variable,miss,minimum,maximum,avg)
+  return(out)
+}
+
+table1 <- data.frame(Variable = as.character(),Missing = as.numeric(),Minimum = as.numeric(),Maximum = as.numeric(),Mean = as.numeric())
+i <- 1
+for (var in vars) {
+  table1[i,] <- sum_stats(data,var)
+  i <- i + 1
+}
+table1
+```
+
